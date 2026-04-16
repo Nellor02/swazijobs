@@ -209,17 +209,24 @@ export default function RegisterPage() {
     <main className="min-h-screen bg-slate-900 p-6">
       <div className="mx-auto max-w-4xl">
         <div className="mb-8 text-center">
-          <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-2xl font-bold text-white">
-            SJ
-          </div>
+          <div className="mb-4 flex flex-col items-center">
+            <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-2xl font-bold text-white">
+                SH
+            </div>
+            <span className="mt-2 text-lg font-semibold text-slate-100">
+                SwiftHire
+            </span>
+            <p className="mt-3 text-sm text-slate-400 max-w-md mx-auto">
+                SwiftHire is a modern hiring platform built to connect job seekers with their next opportunity and employers with their next valuable employee: quickly, clearly, and with less friction.
+            </p>
+        </div>
+        <h1 className="text-4xl font-bold text-slate-100">
+            Join SwiftHire
+        </h1>
 
-          <h1 className="text-4xl font-bold text-slate-100">
-            Create Your Account
-          </h1>
-
-          <p className="mt-2 text-slate-300">
-            Join as a job seeker or apply for an employer account.
-          </p>
+        <p className="mt-2 text-slate-300">
+            Find your next job. Hire your next star. One click closer with SwiftHire.
+        </p>
         </div>
 
         <div className="mb-6 flex justify-center">
