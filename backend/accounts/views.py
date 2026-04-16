@@ -12,6 +12,20 @@ from .serializers import (
 )
 
 
+class CurrentUserAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(
+            {
+                "id": request.user.id,
+                "username": request.user.username,
+                "email": request.user.email,
+                "role": getattr(request.user, "role", ""),
+            }
+        )
+
+
 class SeekerRegisterAPIView(APIView):
     def post(self, request):
         serializer = SeekerRegisterSerializer(data=request.data)
@@ -38,6 +52,30 @@ class EmployerApplyAPIView(APIView):
             )
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class EmployerApplicationMeAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if getattr(request.user, "role", None) != "employer":
+            return Response(
+                {"error": "Only employer accounts can access employer application status."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            application = EmployerApplication.objects.select_related("user").get(
+                user=request.user
+            )
+        except EmployerApplication.DoesNotExist:
+            return Response(
+                {"error": "Employer application not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = EmployerApplicationSerializer(application)
+        return Response(serializer.data)
 
 
 class AdminEmployerApplicationListAPIView(APIView):

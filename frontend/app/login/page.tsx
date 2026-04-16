@@ -1,18 +1,76 @@
 ﻿"use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import StatusCard from "../../components/StatusCard";
 
-export default function LoginPage() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+type LoginForm = {
+  username: string;
+  password: string;
+};
 
-  async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
+type CurrentUser = {
+  id: number;
+  username: string;
+  email: string;
+  role: string;
+};
+
+type EmployerApplication = {
+  status: string;
+};
+
+async function parseResponseSafely(res: Response) {
+  const contentType = res.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    return await res.json();
+  }
+
+  const text = await res.text();
+  return { error: text || `Request failed with status ${res.status}` };
+}
+
+function extractErrorMessage(data: Record<string, unknown>) {
+  if (!data || typeof data !== "object") {
+    return "Login failed.";
+  }
+
+  if (typeof data.detail === "string" && data.detail.trim()) {
+    return data.detail;
+  }
+
+  if (typeof data.error === "string" && data.error.trim()) {
+    return data.error;
+  }
+
+  return "Login failed.";
+}
+
+export default function LoginPage() {
+  const router = useRouter();
+
+  const [form, setForm] = useState<LoginForm>({
+    username: "",
+    password: "",
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const { name, value } = e.target;
+    setForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  }
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setError("");
     setLoading(true);
+    setError("");
 
     try {
       const tokenRes = await fetch("http://127.0.0.1:8000/api/token/", {
@@ -20,87 +78,124 @@ export default function LoginPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          username,
-          password,
-        }),
+        body: JSON.stringify(form),
       });
 
-      const tokenData = await tokenRes.json();
+      const tokenData = await parseResponseSafely(tokenRes);
 
       if (!tokenRes.ok) {
-        setError(tokenData?.detail || "Login failed");
-        setLoading(false);
-        return;
+        throw new Error(extractErrorMessage(tokenData as Record<string, unknown>));
       }
 
-      const userRes = await fetch("http://127.0.0.1:8000/api/accounts/login/", {
-        method: "POST",
+      const access = tokenData?.access;
+      const refresh = tokenData?.refresh;
+
+      if (!access || !refresh) {
+        throw new Error("Login failed. Missing authentication tokens.");
+      }
+
+      localStorage.setItem("access_token", access);
+      localStorage.setItem("refresh_token", refresh);
+
+      const meRes = await fetch("http://127.0.0.1:8000/api/accounts/me/", {
         headers: {
-          "Content-Type": "application/json",
+          Authorization: `Bearer ${access}`,
         },
-        body: JSON.stringify({
-          username,
-          password,
-        }),
       });
 
-      const userData = await userRes.json();
+      const meData = await parseResponseSafely(meRes);
 
-      if (!userRes.ok) {
-        setError(userData?.error || "Failed to fetch user info");
-        setLoading(false);
+      if (!meRes.ok) {
+        throw new Error(meData?.error || "Failed to load account details.");
+      }
+
+      const user = meData as CurrentUser;
+
+      localStorage.setItem("user", JSON.stringify(user));
+
+      if (user.role === "seeker") {
+        router.push("/seeker");
         return;
       }
 
-      localStorage.setItem("access_token", tokenData.access);
-      localStorage.setItem("refresh_token", tokenData.refresh);
+      if (user.role === "admin") {
+        router.push("/employer/jobs");
+        return;
+      }
 
-      localStorage.setItem(
-        "user",
-        JSON.stringify({
-          username: userData.username,
-          role: userData.role,
-        })
-      );
+      if (user.role === "employer") {
+        const appRes = await fetch(
+          "http://127.0.0.1:8000/api/accounts/employer-application/me/",
+          {
+            headers: {
+              Authorization: `Bearer ${access}`,
+            },
+          }
+        );
 
-      window.location.href = "/";
+        const appData = await parseResponseSafely(appRes);
+
+        if (!appRes.ok) {
+          router.push("/employer/application-status");
+          return;
+        }
+
+        const employerApp = appData as EmployerApplication;
+
+        if (employerApp.status === "approved") {
+          router.push("/employer/jobs");
+          return;
+        }
+
+        router.push("/employer/application-status");
+        return;
+      }
+
+      router.push("/");
     } catch (err) {
       console.error(err);
-      setError("Something went wrong");
+      setError(err instanceof Error ? err.message : "Login failed.");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-900 px-6">
-      <div className="w-full max-w-md space-y-6">
+    <main className="min-h-screen bg-slate-900 p-6">
+      <div className="mx-auto max-w-md">
+        <div className="mb-8 text-center">
+          <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-2xl font-bold text-white">
+            SJ
+          </div>
+
+          <h1 className="text-4xl font-bold text-slate-100">Welcome Back</h1>
+          <p className="mt-2 text-slate-300">
+            Log in to continue to your account.
+          </p>
+        </div>
+
         {error && (
-          <StatusCard
-            title="Login Error"
-            message={error}
-            variant="error"
-          />
+          <div className="mb-6">
+            <StatusCard title="Login Error" message={error} variant="error" />
+          </div>
         )}
 
         <form
-          onSubmit={handleLogin}
-          className="space-y-6 rounded-xl border border-slate-700 bg-slate-800 p-8 shadow-sm"
+          onSubmit={handleSubmit}
+          className="space-y-6 rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-sm"
         >
-          <h1 className="text-2xl font-bold text-slate-100">
-            Login
-          </h1>
-
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-200">
               Username
             </label>
             <input
               type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-400 focus:border-blue-500"
+              name="username"
+              value={form.username}
+              onChange={handleChange}
+              required
+              className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 outline-none focus:border-blue-500"
+              placeholder="Enter your username"
             />
           </div>
 
@@ -110,20 +205,30 @@ export default function LoginPage() {
             </label>
             <input
               type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-400 focus:border-blue-500"
+              name="password"
+              value={form.password}
+              onChange={handleChange}
+              required
+              className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 outline-none focus:border-blue-500"
+              placeholder="Enter your password"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-blue-600 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+            className="w-full rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {loading ? "Logging in..." : "Login"}
+            {loading ? "Logging In..." : "Log In"}
           </button>
         </form>
+
+        <div className="mt-6 text-center text-sm text-slate-300">
+          New here?{" "}
+          <Link href="/register" className="font-medium text-blue-400 hover:underline">
+            Create an account
+          </Link>
+        </div>
       </div>
     </main>
   );
