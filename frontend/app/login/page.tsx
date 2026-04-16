@@ -164,14 +164,24 @@ export default function LoginPage() {
     <main className="min-h-screen bg-slate-900 p-6">
       <div className="mx-auto max-w-md">
         <div className="mb-8 text-center">
-          <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-2xl font-bold text-white">
-            SJ
+          <div className="mb-4 flex flex-col items-center">
+            <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-2xl font-bold text-white">
+              SH
+            </div>
+            <span className="mt-2 text-lg font-semibold text-slate-100">
+              SwiftHire
+            </span>
+            <p className="mt-3 text-sm text-slate-400 max-w-md mx-auto">
+              SwiftHire is a modern hiring platform built to connect job seekers with their next opportunity and employers with their next valuable employee — quickly, clearly, and with less friction.
+            </p>
           </div>
 
-          <h1 className="text-4xl font-bold text-slate-100">Welcome Back</h1>
-          <p className="mt-2 text-slate-300">
-            Log in to continue to your account.
-          </p>
+          <h1 className="text-4xl font-bold text-slate-100">
+            Welcome to SwiftHire
+        </h1>
+        <p className="mt-2 text-slate-300">
+          Fast connections. Better careers. Stronger teams.
+        </p>
         </div>
 
         {error && (
