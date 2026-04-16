@@ -354,16 +354,24 @@ export default function HomePage() {
     router.push(`/jobs/${jobId}`);
   }
 
+  const heroTitle =
+    user?.role === "employer" || user?.role === "admin"
+      ? "See Trending Jobs"
+      : "Find Your Next Job";
+
+  const heroSubtitle =
+    user?.role === "employer" || user?.role === "admin"
+      ? "Explore what companies are posting and stay informed about the hiring market."
+      : "Browse available opportunities and apply in just a few clicks.";
+
   return (
     <main className="min-h-screen bg-slate-900 p-6">
       <div className="mx-auto max-w-7xl">
         <AuthStatus />
 
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-slate-100">Find Your Next Job</h1>
-          <p className="mt-2 text-slate-300">
-            Browse available opportunities and apply in just a few clicks.
-          </p>
+          <h1 className="text-4xl font-bold text-slate-100">{heroTitle}</h1>
+          <p className="mt-2 text-slate-300">{heroSubtitle}</p>
         </div>
 
         <div className="mb-6 grid gap-4 md:grid-cols-4">

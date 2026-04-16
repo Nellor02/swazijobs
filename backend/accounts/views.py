@@ -68,14 +68,35 @@ class EmployerApplicationMeAPIView(APIView):
             application = EmployerApplication.objects.select_related("user").get(
                 user=request.user
             )
+            serializer = EmployerApplicationSerializer(application)
+            return Response(serializer.data)
         except EmployerApplication.DoesNotExist:
+            # Legacy employer accounts created before employer application flow
+            # should still be treated as valid approved employers.
             return Response(
-                {"error": "Employer application not found."},
-                status=status.HTTP_404_NOT_FOUND,
+                {
+                    "id": None,
+                    "user": request.user.id,
+                    "username": request.user.username,
+                    "email": request.user.email,
+                    "company_name": "Legacy Employer Account",
+                    "company_email": request.user.email,
+                    "company_phone": "",
+                    "company_website": "",
+                    "company_registration_number": "",
+                    "company_address": "",
+                    "business_description": "",
+                    "contact_person_name": request.user.username,
+                    "contact_person_position": "",
+                    "supporting_note": "",
+                    "status": "approved",
+                    "admin_notes": "This is an existing employer account created before the employer application review workflow was introduced.",
+                    "submitted_at": None,
+                    "reviewed_at": None,
+                    "legacy_account": True,
+                },
+                status=status.HTTP_200_OK,
             )
-
-        serializer = EmployerApplicationSerializer(application)
-        return Response(serializer.data)
 
 
 class AdminEmployerApplicationListAPIView(APIView):

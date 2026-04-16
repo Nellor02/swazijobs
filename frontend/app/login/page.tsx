@@ -19,6 +19,7 @@ type CurrentUser = {
 
 type EmployerApplication = {
   status: string;
+  legacy_account?: boolean;
 };
 
 async function parseResponseSafely(res: Response) {
@@ -119,7 +120,7 @@ export default function LoginPage() {
       }
 
       if (user.role === "admin") {
-        router.push("/employer/jobs");
+        router.push("/admin/employer-applications");
         return;
       }
 
@@ -136,13 +137,13 @@ export default function LoginPage() {
         const appData = await parseResponseSafely(appRes);
 
         if (!appRes.ok) {
-          router.push("/employer/application-status");
+          router.push("/employer/jobs");
           return;
         }
 
         const employerApp = appData as EmployerApplication;
 
-        if (employerApp.status === "approved") {
+        if (employerApp.status === "approved" || employerApp.legacy_account) {
           router.push("/employer/jobs");
           return;
         }
@@ -171,17 +172,19 @@ export default function LoginPage() {
             <span className="mt-2 text-lg font-semibold text-slate-100">
               SwiftHire
             </span>
-            <p className="mt-3 text-sm text-slate-400 max-w-md mx-auto">
-              SwiftHire is a modern hiring platform built to connect job seekers with their next opportunity and employers with their next valuable employee — quickly, clearly, and with less friction.
-            </p>
           </div>
 
           <h1 className="text-4xl font-bold text-slate-100">
             Welcome to SwiftHire
-        </h1>
-        <p className="mt-2 text-slate-300">
-          Fast connections. Better careers. Stronger teams.
-        </p>
+          </h1>
+          <p className="mt-2 text-slate-300">
+            Fast connections. Better careers. Stronger teams.
+          </p>
+          <p className="mx-auto mt-3 max-w-md text-sm text-slate-400">
+            SwiftHire is a modern hiring platform built to connect job seekers
+            with their next opportunity and employers with their next valuable
+            employee — quickly, clearly, and with less friction.
+          </p>
         </div>
 
         {error && (
