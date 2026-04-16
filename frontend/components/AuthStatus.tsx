@@ -163,7 +163,7 @@ export default function AuthStatus() {
               </>
             )}
 
-            {(user.role === "employer" || user.role === "admin") && (
+            {user.role === "employer" && (
               <>
                 <Link
                   href="/employer/jobs"
@@ -191,6 +191,38 @@ export default function AuthStatus() {
                   className="rounded-lg bg-yellow-600 px-4 py-2 text-sm font-medium text-white hover:bg-yellow-700"
                 >
                   Accepted Candidates
+                </Link>
+
+                <Link
+                  href="/messages"
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                >
+                  Messages
+                </Link>
+
+                <NavLinkWithBadge
+                  href="/notifications"
+                  label="Notifications"
+                  badgeCount={unreadNotifications}
+                  className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+                />
+              </>
+            )}
+
+            {user.role === "admin" && (
+              <>
+                <Link
+                  href="/admin/employer-applications"
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  Employer Reviews
+                </Link>
+
+                <Link
+                  href="/employer/jobs"
+                  className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"
+                >
+                  Platform Jobs
                 </Link>
 
                 <Link
