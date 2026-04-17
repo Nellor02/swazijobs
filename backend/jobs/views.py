@@ -9,11 +9,18 @@ from .serializers import JobSerializer
 from applications.models import Application
 from profiles.models import ShortlistedCandidate
 from companies.models import Company
+from accounts.models import EmployerApplication
 
 
 class JobListCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
-        queryset = Job.objects.filter(status="active").select_related("company").order_by("-created_at")
+        queryset = (
+            Job.objects.filter(status="active")
+            .select_related("company")
+            .order_by("-created_at")
+        )
 
         search = request.query_params.get("search", "").strip()
         location = request.query_params.get("location", "").strip()
@@ -32,16 +39,24 @@ class JobListCreateAPIView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        if getattr(request.user, "role", None) not in ["employer", "admin"]:
+        if getattr(request.user, "role", None) != "employer":
             return Response(
-                {"error": "Only employers and admins can create jobs."},
+                {"error": "Only employers can create jobs."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        if getattr(request.user, "role", None) == "admin":
-            company = Company.objects.first()
-        else:
-            company = Company.objects.filter(owner=request.user).first()
+        try:
+            employer_application = EmployerApplication.objects.get(user=request.user)
+            if employer_application.status != "approved":
+                return Response(
+                    {"error": "Your employer account is pending approval."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        except EmployerApplication.DoesNotExist:
+            # Legacy employer account -> allowed
+            pass
+
+        company = Company.objects.filter(owner=request.user).first()
 
         if not company:
             return Response(
@@ -67,7 +82,10 @@ class JobDetailAPIView(APIView):
     def get(self, request, pk):
         job = self.get_object(pk)
         if not job:
-            return Response({"error": "Job not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Job not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         serializer = JobSerializer(job)
         return Response(serializer.data)
@@ -81,13 +99,27 @@ class JobDetailAPIView(APIView):
 
         job = self.get_object(pk)
         if not job:
-            return Response({"error": "Job not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Job not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         if getattr(request.user, "role", None) not in ["employer", "admin"]:
             return Response(
                 {"error": "Only employers and admins can edit jobs."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+
+        if getattr(request.user, "role", None) == "employer":
+            try:
+                employer_application = EmployerApplication.objects.get(user=request.user)
+                if employer_application.status != "approved":
+                    return Response(
+                        {"error": "Your employer account is pending approval."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except EmployerApplication.DoesNotExist:
+                pass
 
         if getattr(request.user, "role", None) != "admin":
             company = Company.objects.filter(owner=request.user).first()
@@ -113,13 +145,27 @@ class JobDetailAPIView(APIView):
 
         job = self.get_object(pk)
         if not job:
-            return Response({"error": "Job not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Job not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         if getattr(request.user, "role", None) not in ["employer", "admin"]:
             return Response(
                 {"error": "Only employers and admins can delete jobs."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+
+        if getattr(request.user, "role", None) == "employer":
+            try:
+                employer_application = EmployerApplication.objects.get(user=request.user)
+                if employer_application.status != "approved":
+                    return Response(
+                        {"error": "Your employer account is pending approval."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except EmployerApplication.DoesNotExist:
+                pass
 
         if getattr(request.user, "role", None) != "admin":
             company = Company.objects.filter(owner=request.user).first()
@@ -130,7 +176,10 @@ class JobDetailAPIView(APIView):
                 )
 
         job.delete()
-        return Response({"message": "Job deleted successfully."}, status=status.HTTP_200_OK)
+        return Response(
+            {"message": "Job deleted successfully."},
+            status=status.HTTP_200_OK,
+        )
 
 
 class EmployerJobListAPIView(APIView):
@@ -143,6 +192,18 @@ class EmployerJobListAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if getattr(request.user, "role", None) == "employer":
+            try:
+                employer_application = EmployerApplication.objects.get(user=request.user)
+                if employer_application.status != "approved":
+                    return Response(
+                        {"error": "Your employer account is pending approval."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except EmployerApplication.DoesNotExist:
+                # Legacy employer account -> allowed
+                pass
+
         if getattr(request.user, "role", None) == "admin":
             queryset = Job.objects.select_related("company").order_by("-created_at")
         else:
@@ -153,7 +214,11 @@ class EmployerJobListAPIView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            queryset = Job.objects.filter(company=company).select_related("company").order_by("-created_at")
+            queryset = (
+                Job.objects.filter(company=company)
+                .select_related("company")
+                .order_by("-created_at")
+            )
 
         page = int(request.query_params.get("page", 1))
         page_size = int(request.query_params.get("page_size", 5))
@@ -169,7 +234,9 @@ class EmployerJobListAPIView(APIView):
                 "total_pages": paginator.num_pages,
                 "current_page": page_obj.number,
                 "next": page_obj.next_page_number() if page_obj.has_next() else None,
-                "previous": page_obj.previous_page_number() if page_obj.has_previous() else None,
+                "previous": page_obj.previous_page_number()
+                if page_obj.has_previous()
+                else None,
                 "results": serializer.data,
             }
         )
@@ -185,6 +252,18 @@ class EmployerDashboardStatsAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if getattr(request.user, "role", None) == "employer":
+            try:
+                employer_application = EmployerApplication.objects.get(user=request.user)
+                if employer_application.status != "approved":
+                    return Response(
+                        {"error": "Your employer account is pending approval."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except EmployerApplication.DoesNotExist:
+                # Legacy employer account -> allowed
+                pass
+
         if getattr(request.user, "role", None) == "admin":
             total_jobs = Job.objects.count()
             total_applications = Application.objects.count()
@@ -199,7 +278,9 @@ class EmployerDashboardStatsAPIView(APIView):
             total_jobs = Job.objects.filter(company=company).count()
             total_applications = Application.objects.filter(job__company=company).count()
 
-        total_shortlisted = ShortlistedCandidate.objects.filter(employer=request.user).count()
+        total_shortlisted = ShortlistedCandidate.objects.filter(
+            employer=request.user
+        ).count()
 
         return Response(
             {

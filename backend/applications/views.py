@@ -7,6 +7,7 @@ from jobs.models import Job
 from .models import Application
 from .serializers import ApplicationSerializer
 from profiles.models import Notification
+from accounts.models import EmployerApplication
 
 
 class MyApplicationsAPIView(APIView):
@@ -14,8 +15,7 @@ class MyApplicationsAPIView(APIView):
 
     def get(self, request):
         applications = (
-            Application.objects
-            .filter(applicant=request.user)
+            Application.objects.filter(applicant=request.user)
             .select_related("job", "applicant", "job__company")
         )
         serializer = ApplicationSerializer(applications, many=True)
@@ -34,8 +34,7 @@ class SeekerApplicationDetailAPIView(APIView):
 
         try:
             application = (
-                Application.objects
-                .select_related("job", "job__company", "applicant")
+                Application.objects.select_related("job", "job__company", "applicant")
                 .get(pk=pk, applicant=request.user)
             )
         except Application.DoesNotExist:
@@ -112,6 +111,18 @@ class EmployerJobApplicationsAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if getattr(request.user, "role", None) == "employer":
+            try:
+                employer_application = EmployerApplication.objects.get(user=request.user)
+                if employer_application.status != "approved":
+                    return Response(
+                        {"error": "Your employer account is pending approval."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except EmployerApplication.DoesNotExist:
+                # Legacy employer account -> allowed
+                pass
+
         try:
             job = Job.objects.select_related("company").get(id=job_id)
         except Job.DoesNotExist:
@@ -120,15 +131,17 @@ class EmployerJobApplicationsAPIView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if getattr(job.company, "owner_id", None) != request.user.id and getattr(request.user, "role", None) != "admin":
+        if (
+            getattr(job.company, "owner_id", None) != request.user.id
+            and getattr(request.user, "role", None) != "admin"
+        ):
             return Response(
                 {"error": "You do not have permission to view applicants for this job."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         applications = (
-            Application.objects
-            .filter(job=job)
+            Application.objects.filter(job=job)
             .select_related("job", "applicant", "job__company")
         )
         serializer = ApplicationSerializer(applications, many=True)
@@ -141,9 +154,7 @@ class EmployerApplicationDetailAPIView(APIView):
     def get(self, request, pk):
         try:
             application = (
-                Application.objects
-                .select_related("job__company", "applicant")
-                .get(pk=pk)
+                Application.objects.select_related("job__company", "applicant").get(pk=pk)
             )
         except Application.DoesNotExist:
             return Response(
@@ -156,6 +167,17 @@ class EmployerApplicationDetailAPIView(APIView):
                 {"error": "Not authorized."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+
+        if getattr(request.user, "role", None) == "employer":
+            try:
+                employer_application = EmployerApplication.objects.get(user=request.user)
+                if employer_application.status != "approved":
+                    return Response(
+                        {"error": "Your employer account is pending approval."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except EmployerApplication.DoesNotExist:
+                pass
 
         if getattr(request.user, "role", None) != "admin":
             if getattr(application.job.company, "owner_id", None) != request.user.id:
@@ -178,10 +200,20 @@ class UpdateApplicationStatusAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if getattr(request.user, "role", None) == "employer":
+            try:
+                employer_application = EmployerApplication.objects.get(user=request.user)
+                if employer_application.status != "approved":
+                    return Response(
+                        {"error": "Your employer account is pending approval."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except EmployerApplication.DoesNotExist:
+                pass
+
         try:
             application = (
-                Application.objects
-                .select_related("job", "applicant", "job__company")
+                Application.objects.select_related("job", "applicant", "job__company")
                 .get(id=application_id)
             )
         except Application.DoesNotExist:
@@ -233,10 +265,20 @@ class UpdateApplicationNotesAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if getattr(request.user, "role", None) == "employer":
+            try:
+                employer_application = EmployerApplication.objects.get(user=request.user)
+                if employer_application.status != "approved":
+                    return Response(
+                        {"error": "Your employer account is pending approval."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except EmployerApplication.DoesNotExist:
+                pass
+
         try:
             application = (
-                Application.objects
-                .select_related("job__company", "applicant")
+                Application.objects.select_related("job__company", "applicant")
                 .get(id=application_id)
             )
         except Application.DoesNotExist:
@@ -250,7 +292,9 @@ class UpdateApplicationNotesAPIView(APIView):
             and getattr(request.user, "role", None) != "admin"
         ):
             return Response(
-                {"error": "You do not have permission to update employer notes for this application."},
+                {
+                    "error": "You do not have permission to update employer notes for this application."
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -277,6 +321,17 @@ class EmployerAcceptedCandidatesAPIView(APIView):
             )
 
         from companies.models import Company
+
+        if getattr(request.user, "role", None) == "employer":
+            try:
+                employer_application = EmployerApplication.objects.get(user=request.user)
+                if employer_application.status != "approved":
+                    return Response(
+                        {"error": "Your employer account is pending approval."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except EmployerApplication.DoesNotExist:
+                pass
 
         if request.user.role == "admin":
             applications = Application.objects.filter(status="accepted")
