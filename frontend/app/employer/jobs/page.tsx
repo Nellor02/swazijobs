@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { getStoredUser } from "../../../lib/auth";
 import { authFetch } from "../../../lib/api";
 import StatusCard from "../../../components/StatusCard";
@@ -31,6 +30,11 @@ type Stats = {
   total_jobs: number;
   total_applications: number;
   total_shortlisted: number;
+};
+
+type EmployerApplicationStatus = {
+  status: string;
+  legacy_account?: boolean;
 };
 
 function getJobTypeClasses(jobType: string) {
@@ -96,11 +100,11 @@ async function parseResponseSafely(res: Response) {
 const PAGE_SIZE = 5;
 
 export default function EmployerJobsPage() {
-  const router = useRouter();
-
   const [userChecked, setUserChecked] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isEmployer, setIsEmployer] = useState(false);
+  const [isApprovedEmployer, setIsApprovedEmployer] = useState(true);
+  const [approvalLoading, setApprovalLoading] = useState(true);
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -124,6 +128,7 @@ export default function EmployerJobsPage() {
       setIsLoggedIn(false);
       setIsEmployer(false);
       setLoading(false);
+      setApprovalLoading(false);
       return;
     }
 
@@ -133,14 +138,56 @@ export default function EmployerJobsPage() {
     if (!["employer", "admin"].includes(user.role)) {
       setIsEmployer(false);
       setLoading(false);
+      setApprovalLoading(false);
       return;
     }
 
     setIsEmployer(true);
+
+    if (user.role === "admin") {
+      setIsApprovedEmployer(true);
+      setApprovalLoading(false);
+      return;
+    }
+
+    authFetch("http://127.0.0.1:8000/api/accounts/employer-application/me/")
+      .then(async (res) => {
+        const data = await parseResponseSafely(res);
+
+        if (!res.ok) {
+          setIsApprovedEmployer(true);
+          setApprovalLoading(false);
+          return;
+        }
+
+        const typed = data as EmployerApplicationStatus;
+
+        if (typed.legacy_account || typed.status === "approved") {
+          setIsApprovedEmployer(true);
+        } else {
+          setIsApprovedEmployer(false);
+        }
+
+        setApprovalLoading(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        setIsApprovedEmployer(true);
+        setApprovalLoading(false);
+      });
   }, []);
 
   useEffect(() => {
-    if (!userChecked || !isLoggedIn || !isEmployer) {
+    if (
+      !userChecked ||
+      !isLoggedIn ||
+      !isEmployer ||
+      approvalLoading ||
+      !isApprovedEmployer
+    ) {
+      if (!approvalLoading && !isApprovedEmployer) {
+        setLoading(false);
+      }
       return;
     }
 
@@ -170,10 +217,16 @@ export default function EmployerJobsPage() {
         setError(err instanceof Error ? err.message : "Could not load jobs.");
         setLoading(false);
       });
-  }, [userChecked, isLoggedIn, isEmployer, currentPage]);
+  }, [userChecked, isLoggedIn, isEmployer, approvalLoading, isApprovedEmployer, currentPage]);
 
   useEffect(() => {
-    if (!userChecked || !isLoggedIn || !isEmployer) {
+    if (
+      !userChecked ||
+      !isLoggedIn ||
+      !isEmployer ||
+      approvalLoading ||
+      !isApprovedEmployer
+    ) {
       return;
     }
 
@@ -188,7 +241,7 @@ export default function EmployerJobsPage() {
       .catch((err) => {
         console.error(err);
       });
-  }, [userChecked, isLoggedIn, isEmployer]);
+  }, [userChecked, isLoggedIn, isEmployer, approvalLoading, isApprovedEmployer]);
 
   async function handleDelete(jobId: number) {
     const confirmDelete = confirm("Are you sure you want to delete this job?");
@@ -237,10 +290,6 @@ export default function EmployerJobsPage() {
     setCurrentPage((prev) => Math.min(totalPages, prev + 1));
   }
 
-  function handleCardClick(jobId: number) {
-    router.push(`/jobs/${jobId}`);
-  }
-
   if (!userChecked) {
     return null;
   }
@@ -271,6 +320,36 @@ export default function EmployerJobsPage() {
             variant="error"
             actionHref="/"
             actionLabel="Back to Home"
+          />
+        </div>
+      </main>
+    );
+  }
+
+  if (approvalLoading) {
+    return (
+      <main className="min-h-screen bg-slate-900 p-6">
+        <div className="mx-auto max-w-6xl">
+          <StatusCard
+            title="Checking Account Status"
+            message="Please wait while we verify your employer account approval."
+            variant="info"
+          />
+        </div>
+      </main>
+    );
+  }
+
+  if (!isApprovedEmployer) {
+    return (
+      <main className="min-h-screen bg-slate-900 p-6">
+        <div className="mx-auto max-w-6xl">
+          <StatusCard
+            title="Employer Access Locked"
+            message="Your employer account is pending approval or has been rejected. Review your application status for more details."
+            variant="warning"
+            actionHref="/employer/application-status"
+            actionLabel="View Application Status"
           />
         </div>
       </main>
@@ -377,16 +456,7 @@ export default function EmployerJobsPage() {
               {jobs.map((job) => (
                 <div
                   key={job.id}
-                  onClick={() => handleCardClick(job.id)}
-                  className="cursor-pointer rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-sm transition hover:border-slate-500 hover:bg-slate-750"
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      handleCardClick(job.id);
-                    }
-                  }}
+                  className="rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-sm"
                 >
                   <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                     <div className="flex-1">
@@ -417,27 +487,16 @@ export default function EmployerJobsPage() {
                       </div>
 
                       <div className="mt-4">
-                        <div className="mb-2 flex items-center justify-between gap-3">
-                          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">
-                            Description
-                          </h3>
-
-                          <span className="text-xs text-blue-400">
-                            Click card for full details
-                          </span>
-                        </div>
-
+                        <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+                          Description
+                        </h3>
                         <p className="whitespace-pre-line text-slate-200">
                           {truncateText(job.description)}
                         </p>
                       </div>
                     </div>
 
-                    <div
-                      className="flex flex-wrap gap-3 md:ml-6"
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    >
+                    <div className="flex flex-wrap gap-3 md:ml-6">
                       <Link
                         href={`/jobs/${job.id}`}
                         className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"

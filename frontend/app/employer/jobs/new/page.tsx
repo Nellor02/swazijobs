@@ -1,9 +1,10 @@
 ﻿"use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authFetch } from "../../../../lib/api";
+import { getStoredUser } from "../../../../lib/auth";
 import StatusCard from "../../../../components/StatusCard";
 
 type JobFormData = {
@@ -19,6 +20,11 @@ type JobFormData = {
 type ErrorResponse = {
   error?: string;
   [key: string]: unknown;
+};
+
+type EmployerApplicationStatus = {
+  status: string;
+  legacy_account?: boolean;
 };
 
 async function parseResponseSafely(res: Response) {
@@ -66,6 +72,11 @@ function extractErrorMessage(data: ErrorResponse) {
 export default function CreateJobPage() {
   const router = useRouter();
 
+  const [userChecked, setUserChecked] = useState(false);
+  const [isEmployer, setIsEmployer] = useState(false);
+  const [isApprovedEmployer, setIsApprovedEmployer] = useState(true);
+  const [approvalLoading, setApprovalLoading] = useState(true);
+
   const [formData, setFormData] = useState<JobFormData>({
     title: "",
     description: "",
@@ -79,6 +90,46 @@ export default function CreateJobPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    const user = getStoredUser();
+
+    setUserChecked(true);
+
+    if (!user || user.role !== "employer") {
+      setIsEmployer(false);
+      setApprovalLoading(false);
+      return;
+    }
+
+    setIsEmployer(true);
+
+    authFetch("http://127.0.0.1:8000/api/accounts/employer-application/me/")
+      .then(async (res) => {
+        const data = await parseResponseSafely(res);
+
+        if (!res.ok) {
+          setIsApprovedEmployer(true);
+          setApprovalLoading(false);
+          return;
+        }
+
+        const typed = data as EmployerApplicationStatus;
+
+        if (typed.legacy_account || typed.status === "approved") {
+          setIsApprovedEmployer(true);
+        } else {
+          setIsApprovedEmployer(false);
+        }
+
+        setApprovalLoading(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        setIsApprovedEmployer(true);
+        setApprovalLoading(false);
+      });
+  }, []);
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -132,6 +183,52 @@ export default function CreateJobPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (!userChecked || approvalLoading) {
+    return (
+      <main className="min-h-screen bg-slate-900 p-6">
+        <div className="mx-auto max-w-3xl">
+          <StatusCard
+            title="Checking Account Status"
+            message="Please wait while we verify your employer account approval."
+            variant="info"
+          />
+        </div>
+      </main>
+    );
+  }
+
+  if (!isEmployer) {
+    return (
+      <main className="min-h-screen bg-slate-900 p-6">
+        <div className="mx-auto max-w-3xl">
+          <StatusCard
+            title="Access Restricted"
+            message="Only employers can create jobs."
+            variant="error"
+            actionHref="/"
+            actionLabel="Back to Home"
+          />
+        </div>
+      </main>
+    );
+  }
+
+  if (!isApprovedEmployer) {
+    return (
+      <main className="min-h-screen bg-slate-900 p-6">
+        <div className="mx-auto max-w-3xl">
+          <StatusCard
+            title="Employer Access Locked"
+            message="Your employer account is pending approval or has been rejected. You cannot create jobs until your account is approved."
+            variant="warning"
+            actionHref="/employer/application-status"
+            actionLabel="View Application Status"
+          />
+        </div>
+      </main>
+    );
   }
 
   return (

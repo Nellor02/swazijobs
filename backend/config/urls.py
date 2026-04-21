@@ -19,6 +19,7 @@ urlpatterns = [
     path("api/applications/", include("applications.urls")),
     path("api/profiles/", include("profiles.urls")),
     path("api/saved-jobs/", include("saved_jobs.urls")),
+    path("api/companies/", include("companies.urls")),
 
     path("api/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
