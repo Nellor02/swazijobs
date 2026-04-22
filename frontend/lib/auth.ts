@@ -1,4 +1,4 @@
-export type StoredUser = {
+type StoredUser = {
   username: string;
   role: string;
 };
@@ -6,22 +6,33 @@ export type StoredUser = {
 export function getStoredUser(): StoredUser | null {
   if (typeof window === "undefined") return null;
 
-  const rawUser = localStorage.getItem("user");
-  const accessToken = localStorage.getItem("access_token");
-
-  if (!rawUser || !accessToken) return null;
-
   try {
-    return JSON.parse(rawUser);
+    const raw = localStorage.getItem("user");
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof parsed.username !== "string" ||
+      typeof parsed.role !== "string"
+    ) {
+      localStorage.removeItem("user");
+      return null;
+    }
+
+    return {
+      username: parsed.username,
+      role: parsed.role,
+    };
   } catch {
     localStorage.removeItem("user");
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
     return null;
   }
 }
 
-export function logoutUser() {
+export function clearStoredAuth() {
   if (typeof window === "undefined") return;
 
   localStorage.removeItem("user");

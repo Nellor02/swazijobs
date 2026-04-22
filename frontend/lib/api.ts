@@ -1,3 +1,5 @@
+import { clearStoredAuth } from "./auth";
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 
@@ -16,11 +18,15 @@ function setAccessToken(token: string) {
   localStorage.setItem("access_token", token);
 }
 
-function clearAuth() {
+function redirectToLoginIfNeeded() {
   if (typeof window === "undefined") return;
-  localStorage.removeItem("access_token");
-  localStorage.removeItem("refresh_token");
-  localStorage.removeItem("user");
+
+  const path = window.location.pathname;
+  const publicPaths = ["/", "/login", "/register"];
+
+  if (!publicPaths.includes(path)) {
+    window.location.href = "/login";
+  }
 }
 
 async function refreshAccessToken(): Promise<string | null> {
@@ -39,14 +45,16 @@ async function refreshAccessToken(): Promise<string | null> {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok || !data?.access) {
-      clearAuth();
+      clearStoredAuth();
+      redirectToLoginIfNeeded();
       return null;
     }
 
     setAccessToken(data.access);
     return data.access;
   } catch {
-    clearAuth();
+    clearStoredAuth();
+    redirectToLoginIfNeeded();
     return null;
   }
 }
@@ -94,6 +102,11 @@ export async function authFetch(
     ...init,
     headers: retryHeaders,
   });
+
+  if (response.status === 401) {
+    clearStoredAuth();
+    redirectToLoginIfNeeded();
+  }
 
   return response;
 }
