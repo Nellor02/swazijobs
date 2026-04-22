@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import AuthStatus from "../components/AuthStatus";
 import Pagination from "../components/Pagination";
 import StatusCard from "../components/StatusCard";
-import { authFetch } from "../lib/api";
+import { authFetch, getApiBaseUrl } from "../lib/api";
 import { getStoredUser } from "../lib/auth";
 
 type Job = {
@@ -149,6 +149,7 @@ export default function HomePage() {
   const [saveError, setSaveError] = useState("");
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedLocation, setSelectedLocation] = useState("");
   const [selectedJobType, setSelectedJobType] = useState("");
   const [sortBy, setSortBy] = useState("newest");
@@ -163,25 +164,28 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    setLoading(true);
-    setError("");
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+    }, 400);
 
-    fetch(`http://127.0.0.1:8000/api/jobs/?page=1&page_size=100`)
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    fetch(`${getApiBaseUrl()}/api/jobs/?page=1&page_size=100`)
       .then(async (res) => {
         const data = await parseResponseSafely(res);
-
         if (!res.ok) {
           throw new Error(data?.error || "Failed to load jobs.");
         }
-
         return data;
       })
       .then((data: PaginatedJobsResponse | Job[]) => {
         const results = Array.isArray(data)
           ? data
           : Array.isArray(data.results)
-          ? data.results
-          : [];
+            ? data.results
+            : [];
 
         setAllJobs(results);
       })
@@ -200,7 +204,7 @@ export default function HomePage() {
     setSavedJobsLoading(true);
     setSaveError("");
 
-    authFetch("http://127.0.0.1:8000/api/saved-jobs/")
+    authFetch("/api/saved-jobs/")
       .then(async (res) => {
         const data = await parseResponseSafely(res);
 
@@ -231,7 +235,7 @@ export default function HomePage() {
 
     setApplicationsLoading(true);
 
-    authFetch("http://127.0.0.1:8000/api/applications/my/")
+    authFetch("/api/applications/my/")
       .then(async (res) => {
         const data = await parseResponseSafely(res);
 
@@ -256,7 +260,24 @@ export default function HomePage() {
     setLoading(true);
     setError("");
 
-    fetch(`http://127.0.0.1:8000/api/jobs/?page=${currentPage}&page_size=${PAGE_SIZE}`)
+    const queryParams = new URLSearchParams({
+      page: String(currentPage),
+      page_size: String(PAGE_SIZE),
+    });
+
+    if (debouncedSearch.trim()) {
+      queryParams.append("search", debouncedSearch.trim());
+    }
+
+    if (selectedLocation) {
+      queryParams.append("location", selectedLocation);
+    }
+
+    if (selectedJobType) {
+      queryParams.append("job_type", selectedJobType);
+    }
+
+    fetch(`${getApiBaseUrl()}/api/jobs/?${queryParams.toString()}`)
       .then(async (res) => {
         const data = await parseResponseSafely(res);
 
@@ -270,72 +291,48 @@ export default function HomePage() {
         const results = Array.isArray(data)
           ? data
           : Array.isArray(data.results)
-          ? data.results
-          : [];
+            ? data.results
+            : [];
 
-        let filteredJobs = [...results];
-
-        if (searchTerm.trim()) {
-          const q = searchTerm.trim().toLowerCase();
-          filteredJobs = filteredJobs.filter((job) =>
-            (job.title || "").toLowerCase().includes(q)
-          );
-        }
-
-        if (selectedLocation) {
-          filteredJobs = filteredJobs.filter(
-            (job) => normalizeLocation(job.location) === selectedLocation
-          );
-        }
-
-        if (selectedJobType) {
-          filteredJobs = filteredJobs.filter(
-            (job) => normalizeJobType(job.job_type) === selectedJobType
-          );
-        }
+        const rankedJobs = [...results];
 
         switch (sortBy) {
           case "salary_high":
-            filteredJobs.sort(
+            rankedJobs.sort(
               (a, b) =>
                 (b.salary_max || b.salary_min || 0) -
                 (a.salary_max || a.salary_min || 0)
             );
             break;
           case "salary_low":
-            filteredJobs.sort(
+            rankedJobs.sort(
               (a, b) =>
                 (a.salary_min || a.salary_max || 0) -
                 (b.salary_min || b.salary_max || 0)
             );
             break;
           case "title_asc":
-            filteredJobs.sort((a, b) =>
+            rankedJobs.sort((a, b) =>
               (a.title || "").localeCompare(b.title || "")
             );
             break;
           case "title_desc":
-            filteredJobs.sort((a, b) =>
+            rankedJobs.sort((a, b) =>
               (b.title || "").localeCompare(a.title || "")
             );
             break;
           case "newest":
           default:
-            filteredJobs.sort(
-              (a, b) =>
-                new Date(b.created_at || 0).getTime() -
-                new Date(a.created_at || 0).getTime()
-            );
             break;
         }
 
-        setJobs(filteredJobs);
+        setJobs(rankedJobs);
 
         const total =
-          Array.isArray(data) ? filteredJobs.length : data.count ?? filteredJobs.length;
+          Array.isArray(data) ? rankedJobs.length : data.count ?? rankedJobs.length;
         const pages =
           Array.isArray(data)
-            ? Math.max(1, Math.ceil(filteredJobs.length / PAGE_SIZE))
+            ? Math.max(1, Math.ceil(rankedJobs.length / PAGE_SIZE))
             : data.total_pages ?? 1;
 
         setTotalCount(total);
@@ -350,7 +347,7 @@ export default function HomePage() {
         setTotalPages(1);
         setLoading(false);
       });
-  }, [currentPage, searchTerm, selectedLocation, selectedJobType, sortBy]);
+  }, [currentPage, debouncedSearch, selectedLocation, selectedJobType, sortBy]);
 
   const locations = useMemo(() => {
     if (!Array.isArray(allJobs)) return [];
@@ -396,12 +393,9 @@ export default function HomePage() {
     const isSaved = savedJobIds.includes(jobId);
 
     try {
-      const res = await authFetch(
-        `http://127.0.0.1:8000/api/saved-jobs/${jobId}/`,
-        {
-          method: isSaved ? "DELETE" : "POST",
-        }
-      );
+      const res = await authFetch(`/api/saved-jobs/${jobId}/`, {
+        method: isSaved ? "DELETE" : "POST",
+      });
 
       const data = await parseResponseSafely(res);
 
@@ -457,7 +451,7 @@ export default function HomePage() {
         <div className="mb-6 grid gap-4 md:grid-cols-4">
           <input
             type="text"
-            placeholder="Search jobs by title..."
+            placeholder="Search jobs by title, company, location, or keyword..."
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value);
@@ -498,6 +492,12 @@ export default function HomePage() {
             ))}
           </select>
         </div>
+
+        {debouncedSearch.trim() && (
+          <p className="mb-4 text-sm text-slate-400">
+            Showing results for: <span className="text-blue-400">"{debouncedSearch}"</span>
+          </p>
+        )}
 
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <p className="text-sm text-slate-300">
@@ -673,8 +673,8 @@ export default function HomePage() {
                               {savingJobId === job.id
                                 ? "Saving..."
                                 : isSaved
-                                ? "Saved"
-                                : "Save"}
+                                  ? "Saved"
+                                  : "Save"}
                             </button>
                           ))}
                       </div>

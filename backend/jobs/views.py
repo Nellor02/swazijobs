@@ -1,4 +1,5 @@
 from django.core.paginator import Paginator
+from django.db.models import Q, Case, When, IntegerField, Value
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -25,7 +26,23 @@ class JobListCreateAPIView(APIView):
         job_type = request.query_params.get("job_type", "").strip()
 
         if search:
-            queryset = queryset.filter(title__icontains=search)
+            queryset = queryset.filter(
+                Q(title__icontains=search)
+                | Q(description__icontains=search)
+                | Q(company__name__icontains=search)
+                | Q(location__icontains=search)
+            ).annotate(
+                relevance=Case(
+                    When(title__icontains=search, then=Value(4)),
+                    When(company__name__icontains=search, then=Value(3)),
+                    When(description__icontains=search, then=Value(2)),
+                    When(location__icontains=search, then=Value(1)),
+                    default=Value(0),
+                    output_field=IntegerField(),
+                )
+            ).order_by("-relevance", "-created_at")
+        else:
+            queryset = queryset.order_by("-created_at")
 
         if location:
             queryset = queryset.filter(location__icontains=location)
@@ -87,6 +104,7 @@ class JobListCreateAPIView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
         except EmployerApplication.DoesNotExist:
+            # Legacy employer account -> allowed
             pass
 
         company = Company.objects.filter(owner=request.user).first()
@@ -234,6 +252,7 @@ class EmployerJobListAPIView(APIView):
                         status=status.HTTP_403_FORBIDDEN,
                     )
             except EmployerApplication.DoesNotExist:
+                # Legacy employer account -> allowed
                 pass
 
         if getattr(request.user, "role", None) == "admin":
@@ -293,6 +312,7 @@ class EmployerDashboardStatsAPIView(APIView):
                         status=status.HTTP_403_FORBIDDEN,
                     )
             except EmployerApplication.DoesNotExist:
+                # Legacy employer account -> allowed
                 pass
 
         if getattr(request.user, "role", None) == "admin":

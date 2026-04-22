@@ -1,53 +1,103 @@
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+
+function getAccessToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("access_token");
+}
+
+function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("refresh_token");
+}
+
+function setAccessToken(token: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("access_token", token);
+}
+
+function clearAuth() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+  localStorage.removeItem("user");
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refresh = getRefreshToken();
+  if (!refresh) return null;
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/token/refresh/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refresh }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data?.access) {
+      clearAuth();
+      return null;
+    }
+
+    setAccessToken(data.access);
+    return data.access;
+  } catch {
+    clearAuth();
+    return null;
+  }
+}
+
 export async function authFetch(
-  input: RequestInfo | URL,
+  input: string,
   init: RequestInit = {}
-) {
-  let accessToken = localStorage.getItem("access_token");
-  const refreshToken = localStorage.getItem("refresh_token");
+): Promise<Response> {
+  const token = getAccessToken();
 
   const headers = new Headers(init.headers || {});
-
-  if (accessToken) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
+  if (!headers.has("Content-Type") && init.body && !(init.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
   }
 
-  let response = await fetch(input, {
+  const url =
+    input.startsWith("http://") || input.startsWith("https://")
+      ? input
+      : `${API_BASE_URL}${input.startsWith("/") ? input : `/${input}`}`;
+
+  let response = await fetch(url, {
     ...init,
     headers,
   });
 
-  if (response.status === 401 && refreshToken) {
-    const refreshResponse = await fetch(
-      "http://127.0.0.1:8000/api/token/refresh/",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          refresh: refreshToken,
-        }),
-      }
-    );
-
-    if (refreshResponse.ok) {
-      const data = await refreshResponse.json();
-      accessToken = data.access;
-
-      localStorage.setItem("access_token", accessToken as string);
-      const retryHeaders = new Headers(init.headers || {});
-      retryHeaders.set("Authorization", `Bearer ${accessToken}`);
-
-      response = await fetch(input, {
-        ...init,
-        headers: retryHeaders,
-      });
-    } else {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("user");
-    }
+  if (response.status !== 401) {
+    return response;
   }
 
+  const newAccessToken = await refreshAccessToken();
+  if (!newAccessToken) {
+    return response;
+  }
+
+  const retryHeaders = new Headers(init.headers || {});
+  if (!retryHeaders.has("Content-Type") && init.body && !(init.body instanceof FormData)) {
+    retryHeaders.set("Content-Type", "application/json");
+  }
+  retryHeaders.set("Authorization", `Bearer ${newAccessToken}`);
+
+  response = await fetch(url, {
+    ...init,
+    headers: retryHeaders,
+  });
+
   return response;
+}
+
+export function getApiBaseUrl(): string {
+  return API_BASE_URL;
 }
