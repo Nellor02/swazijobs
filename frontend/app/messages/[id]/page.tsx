@@ -1,39 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { getStoredUser } from "../../../lib/auth";
 import { authFetch } from "../../../lib/api";
+import { getStoredUser } from "../../../lib/auth";
 import StatusCard from "../../../components/StatusCard";
 
-type CandidateProfile = {
-  id: number;
-  full_name: string;
-  headline: string;
-  location: string;
+type StoredUser = {
+  username: string;
+  role: string;
 };
 
-type Message = {
-  id: number;
-  conversation: number;
-  sender: number;
-  sender_username: string;
-  body: string;
-  created_at: string;
-  is_read: boolean;
-};
+type RawMessage = Record<string, unknown>;
 
-type ConversationDetail = {
-  id: number;
-  employer: number;
-  employer_username: string;
-  seeker: number;
-  seeker_username: string;
-  candidate_profile: CandidateProfile;
-  messages: Message[];
-  created_at: string;
-  updated_at: string;
+type MessageItem = {
+  id: number | string;
+  senderUsername: string;
+  senderRole: string;
+  content: string;
+  createdAt: string;
+  isMine: boolean;
 };
 
 async function parseResponseSafely(res: Response) {
@@ -47,40 +34,97 @@ async function parseResponseSafely(res: Response) {
   return { error: text || `Request failed with status ${res.status}` };
 }
 
-export default function ConversationDetailPage() {
-  const params = useParams<{ id: string }>();
-  const conversationId = String(params.id);
+function asString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function normalizeMessages(data: unknown): RawMessage[] {
+  if (Array.isArray(data)) return data as RawMessage[];
+
+  if (data && typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+
+    if (Array.isArray(obj.results)) return obj.results as RawMessage[];
+    if (Array.isArray(obj.messages)) return obj.messages as RawMessage[];
+    if (Array.isArray(obj.thread)) return obj.thread as RawMessage[];
+    if (Array.isArray(obj.conversation)) return obj.conversation as RawMessage[];
+  }
+
+  return [];
+}
+
+function formatDate(dateString: string) {
+  if (!dateString) return "Unknown time";
+
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+
+  return date.toLocaleString();
+}
+
+function mapRawMessage(item: RawMessage, currentUsername: string): MessageItem {
+  const rawId = item.id ?? item.message_id ?? item.pk;
+  const id: number | string =
+    typeof rawId === "number" || typeof rawId === "string"
+      ? rawId
+      : Math.random().toString(36).slice(2);
+
+  const senderUsername =
+    asString(item.sender_username) ||
+    asString(item.sender) ||
+    asString(item.from_username) ||
+    asString(item.username) ||
+    "Unknown user";
+
+  const senderRole =
+    asString(item.sender_role) ||
+    asString(item.role) ||
+    asString(item.user_role);
+
+  const content =
+    asString(item.content) ||
+    asString(item.message) ||
+    asString(item.body) ||
+    asString(item.text) ||
+    "";
+
+  const createdAt =
+    asString(item.created_at) ||
+    asString(item.sent_at) ||
+    asString(item.timestamp);
+
+  return {
+    id,
+    senderUsername,
+    senderRole,
+    content,
+    createdAt,
+    isMine: senderUsername === currentUsername,
+  };
+}
+
+export default function MessageThreadPage() {
+  const params = useParams<{ id: string | string[] }>();
+  const rawId = params?.id;
+  const threadId = Array.isArray(rawId) ? rawId[0] : rawId;
 
   const [userChecked, setUserChecked] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userRole, setUserRole] = useState("");
-  const [username, setUsername] = useState("");
-
-  const [conversation, setConversation] = useState<ConversationDetail | null>(null);
-  const [messageBody, setMessageBody] = useState("");
+  const [user, setUser] = useState<StoredUser | null>(null);
+  const [messages, setMessages] = useState<MessageItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-
-  const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const user = getStoredUser();
+    const storedUser = getStoredUser();
+    setUser(storedUser);
+    setUserChecked(true);
 
-    if (!user) {
-      setUserChecked(true);
-      setIsLoggedIn(false);
+    if (!storedUser || !threadId) {
       setLoading(false);
       return;
     }
 
-    setUserChecked(true);
-    setIsLoggedIn(true);
-    setUserRole(user.role);
-    setUsername(user.username);
-
-    authFetch(`http://127.0.0.1:8000/api/profiles/messages/${conversationId}/`)
+    authFetch(`http://127.0.0.1:8000/api/profiles/messages/${threadId}/`)
       .then(async (res) => {
         const data = await parseResponseSafely(res);
 
@@ -90,83 +134,41 @@ export default function ConversationDetailPage() {
 
         return data;
       })
-      .then((data: ConversationDetail) => {
-        setConversation(data);
+      .then((data) => {
+        const mapped = normalizeMessages(data).map((item) =>
+          mapRawMessage(item, storedUser.username)
+        );
+
+        mapped.sort((a, b) => {
+          const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return aTime - bTime;
+        });
+
+        setMessages(mapped);
         setLoading(false);
       })
       .catch((err) => {
         console.error(err);
-        setError(
-          err instanceof Error ? err.message : "Could not load conversation."
-        );
+        setError(err instanceof Error ? err.message : "Could not load conversation.");
         setLoading(false);
       });
-  }, [conversationId]);
+  }, [threadId]);
 
-  useEffect(() => {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [conversation]);
-
-  async function handleSendMessage(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setError("");
-    setSuccess("");
-
-    if (!messageBody.trim()) {
-      setError("Message cannot be empty.");
-      return;
-    }
-
-    setSending(true);
-
-    try {
-      const res = await authFetch(
-        `http://127.0.0.1:8000/api/profiles/messages/${conversationId}/send/`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ body: messageBody }),
-        }
-      );
-
-      const data = await parseResponseSafely(res);
-
-      if (!res.ok) {
-        throw new Error(data?.error || "Failed to send message.");
-      }
-
-      setConversation((prev) =>
-        prev
-          ? {
-              ...prev,
-              messages: [...prev.messages, data],
-              updated_at: data.created_at,
-            }
-          : prev
-      );
-
-      setMessageBody("");
-      setSuccess("Message sent.");
-    } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : "Failed to send message.");
-    } finally {
-      setSending(false);
-    }
-  }
+  const otherParticipant = useMemo(() => {
+    if (!user) return "";
+    const other = messages.find((message) => !message.isMine);
+    return other?.senderUsername || "";
+  }, [messages, user]);
 
   if (!userChecked) {
     return null;
   }
 
-  if (!isLoggedIn) {
+  if (!user) {
     return (
       <main className="min-h-screen bg-slate-900 p-6">
-        <div className="mx-auto max-w-5xl">
+        <div className="mx-auto max-w-4xl">
           <StatusCard
             title="Login Required"
             message="You must be logged in to view messages."
@@ -179,25 +181,21 @@ export default function ConversationDetailPage() {
     );
   }
 
-  const backHref = "/messages";
-
   return (
     <main className="min-h-screen bg-slate-900 p-6">
-      <div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-4xl">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-slate-100">Conversation</h1>
-            {conversation && (
-              <p className="mt-1 text-slate-300">
-                {userRole === "employer"
-                  ? conversation.candidate_profile?.full_name || conversation.seeker_username
-                  : conversation.employer_username}
-              </p>
-            )}
+            <h1 className="text-3xl font-bold text-slate-100">
+              {otherParticipant ? `Chat with ${otherParticipant}` : "Conversation"}
+            </h1>
+            <p className="mt-1 text-slate-300">
+              Review your conversation history.
+            </p>
           </div>
 
           <Link
-            href={backHref}
+            href="/messages"
             className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"
           >
             Back to Messages
@@ -207,7 +205,7 @@ export default function ConversationDetailPage() {
         {loading ? (
           <StatusCard
             title="Loading Conversation"
-            message="Please wait while the conversation is being loaded."
+            message="Please wait while messages are loading."
             variant="info"
           />
         ) : error ? (
@@ -215,86 +213,62 @@ export default function ConversationDetailPage() {
             title="Error"
             message={error}
             variant="error"
+            actionHref="/messages"
+            actionLabel="Back to Messages"
           />
-        ) : !conversation ? (
+        ) : messages.length === 0 ? (
           <StatusCard
-            title="Conversation Not Found"
-            message="This conversation could not be found."
+            title="No Messages Yet"
+            message="This conversation does not contain any messages yet."
             variant="neutral"
             actionHref="/messages"
             actionLabel="Back to Messages"
           />
         ) : (
-          <>
-            {success && (
-              <div className="mb-4">
-                <StatusCard
-                  title="Success"
-                  message={success}
-                  variant="success"
-                />
-              </div>
-            )}
+          <div className="rounded-xl border border-slate-700 bg-slate-800 p-4 shadow-sm">
+            <div className="space-y-4">
+              {messages.map((message) => {
+                return (
+                  <div
+                    key={String(message.id)}
+                    className={`flex ${message.isMine ? "justify-end" : "justify-start"}`}
+                  >
+                    <div
+                      className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-sm ${
+                        message.isMine
+                          ? "bg-blue-600 text-white"
+                          : "bg-slate-700 text-slate-100"
+                      }`}
+                    >
+                      <div className="mb-1 flex flex-wrap items-center gap-2 text-xs opacity-90">
+                        <span className="font-semibold">
+                          {message.isMine ? "You" : message.senderUsername}
+                        </span>
 
-            <div className="rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-sm">
-              <div className="max-h-[500px] space-y-4 overflow-y-auto pr-2">
-                {conversation.messages.length === 0 ? (
-                  <p className="text-slate-400">No messages yet.</p>
-                ) : (
-                  conversation.messages.map((message) => {
-                    const isMine = message.sender_username === username;
-
-                    return (
-                      <div
-                        key={message.id}
-                        className={`flex ${isMine ? "justify-end" : "justify-start"}`}
-                      >
-                        <div
-                          className={`max-w-[80%] rounded-xl px-4 py-3 ${
-                            isMine
-                              ? "bg-blue-600 text-white"
-                              : "bg-slate-700 text-slate-100"
-                          }`}
-                        >
-                          <p className="mb-1 text-xs opacity-80">
-                            {message.sender_username}
-                          </p>
-                          <p>{message.body}</p>
-                          <p className="mt-2 text-xs opacity-70">
-                            {new Date(message.created_at).toLocaleString()}
-                          </p>
-                        </div>
+                        {message.senderRole && !message.isMine && (
+                          <span className="rounded-full border border-white/20 px-2 py-0.5">
+                            {message.senderRole}
+                          </span>
+                        )}
                       </div>
-                    );
-                  })
-                )}
-                <div ref={bottomRef} />
-              </div>
 
-              <form onSubmit={handleSendMessage} className="mt-6 space-y-4">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-200">
-                    New Message
-                  </label>
-                  <textarea
-                    value={messageBody}
-                    onChange={(e) => setMessageBody(e.target.value)}
-                    rows={4}
-                    className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 outline-none focus:border-blue-500"
-                    placeholder="Write your message..."
-                  />
-                </div>
+                      <p className="whitespace-pre-line text-sm leading-relaxed">
+                        {message.content || "No content."}
+                      </p>
 
-                <button
-                  type="submit"
-                  disabled={sending}
-                  className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {sending ? "Sending..." : "Send Message"}
-                </button>
-              </form>
+                      <p
+                        className={`mt-2 text-right text-xs ${
+                          message.isMine ? "text-blue-100" : "text-slate-300"
+                        }`}
+                      >
+                        {formatDate(message.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          </>
+          </div>
         )}
       </div>
     </main>

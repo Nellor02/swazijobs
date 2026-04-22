@@ -1,34 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { getStoredUser } from "../../lib/auth";
+import { useEffect, useMemo, useState } from "react";
 import { authFetch } from "../../lib/api";
+import { getStoredUser } from "../../lib/auth";
 import StatusCard from "../../components/StatusCard";
 
-type CandidateProfile = {
-  id: number;
-  full_name: string;
-  headline: string;
-  location: string;
+type StoredUser = {
+  username: string;
+  role: string;
 };
 
-type Conversation = {
-  id: number;
-  employer: number;
-  employer_username: string;
-  seeker: number;
-  seeker_username: string;
-  candidate_profile: CandidateProfile;
-  last_message: {
-    id: number;
-    body: string;
-    sender_username: string;
-    created_at: string;
-  } | null;
-  unread_count: number;
-  created_at: string;
-  updated_at: string;
+type RawConversation = Record<string, unknown>;
+
+type ConversationCard = {
+  id: number | string;
+  title: string;
+  subtitle: string;
+  preview: string;
+  unread: boolean;
+  updatedAt: string;
+  href: string;
 };
 
 async function parseResponseSafely(res: Response) {
@@ -42,62 +34,167 @@ async function parseResponseSafely(res: Response) {
   return { error: text || `Request failed with status ${res.status}` };
 }
 
-function truncateText(text: string, maxLength = 90) {
-  if (!text) return "";
+function asString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function asNumber(value: unknown, fallback = 0) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function asBoolean(value: unknown, fallback = false) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function formatDate(dateString: string) {
+  if (!dateString) return "Unknown date";
+
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+
+  return date.toLocaleString();
+}
+
+function truncateText(text: string, maxLength = 140) {
+  if (!text) return "No messages yet.";
   if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength) + "...";
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function normalizeConversations(data: unknown): RawConversation[] {
+  if (Array.isArray(data)) return data as RawConversation[];
+
+  if (data && typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+
+    if (Array.isArray(obj.results)) return obj.results as RawConversation[];
+    if (Array.isArray(obj.conversations)) return obj.conversations as RawConversation[];
+    if (Array.isArray(obj.messages)) return obj.messages as RawConversation[];
+    if (Array.isArray(obj.threads)) return obj.threads as RawConversation[];
+  }
+
+  return [];
+}
+
+function mapConversationToCard(item: RawConversation): ConversationCard {
+  const rawId =
+    item.id ??
+    item.thread_id ??
+    item.conversation_id ??
+    item.message_thread_id;
+
+  const id: number | string =
+    typeof rawId === "number" || typeof rawId === "string"
+      ? rawId
+      : Math.random().toString(36).slice(2);
+
+  const otherUser =
+    asString(item.other_user_username) ||
+    asString(item.other_username) ||
+    asString(item.recipient_username) ||
+    asString(item.sender_username) ||
+    asString(item.username);
+
+  const title =
+    asString(item.title) ||
+    otherUser ||
+    asString(item.subject) ||
+    "Conversation";
+
+  const subtitle =
+    asString(item.role_label) ||
+    asString(item.other_user_role) ||
+    asString(item.participant_label) ||
+    (otherUser ? `with ${otherUser}` : "Direct message");
+
+  const preview =
+    asString(item.last_message) ||
+    asString(item.preview) ||
+    asString(item.message) ||
+    asString(item.body) ||
+    asString(item.content) ||
+    "No messages yet.";
+
+  const unread =
+    asBoolean(item.is_unread) ||
+    asBoolean(item.unread) ||
+    asNumber(item.unread_count) > 0;
+
+  const updatedAt =
+    asString(item.updated_at) ||
+    asString(item.last_message_at) ||
+    asString(item.created_at);
+
+  const hrefId = encodeURIComponent(String(id));
+  const href = `/messages/${hrefId}`;
+
+  return {
+    id,
+    title,
+    subtitle,
+    preview: truncateText(preview),
+    unread,
+    updatedAt,
+    href,
+  };
 }
 
 export default function MessagesPage() {
   const [userChecked, setUserChecked] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userRole, setUserRole] = useState("");
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [user, setUser] = useState<StoredUser | null>(null);
+  const [cards, setCards] = useState<ConversationCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const user = getStoredUser();
+    const storedUser = getStoredUser();
+    setUser(storedUser);
+    setUserChecked(true);
 
-    if (!user) {
-      setUserChecked(true);
-      setIsLoggedIn(false);
+    if (!storedUser) {
       setLoading(false);
       return;
     }
-
-    setUserChecked(true);
-    setIsLoggedIn(true);
-    setUserRole(user.role);
 
     authFetch("http://127.0.0.1:8000/api/profiles/messages/")
       .then(async (res) => {
         const data = await parseResponseSafely(res);
 
         if (!res.ok) {
-          throw new Error(data?.error || "Could not load conversations.");
+          throw new Error(data?.error || "Could not load messages.");
         }
 
         return data;
       })
-      .then((data: Conversation[]) => {
-        setConversations(Array.isArray(data) ? data : []);
+      .then((data) => {
+        const rows = normalizeConversations(data).map(mapConversationToCard);
+
+        rows.sort((a, b) => {
+          const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          return bTime - aTime;
+        });
+
+        setCards(rows);
         setLoading(false);
       })
       .catch((err) => {
         console.error(err);
-        setError(
-          err instanceof Error ? err.message : "Could not load conversations."
-        );
+        setError(err instanceof Error ? err.message : "Could not load messages.");
         setLoading(false);
       });
   }, []);
+
+  const unreadCount = useMemo(
+    () => cards.filter((card) => card.unread).length,
+    [cards]
+  );
 
   if (!userChecked) {
     return null;
   }
 
-  if (!isLoggedIn) {
+  if (!user) {
     return (
       <main className="min-h-screen bg-slate-900 p-6">
         <div className="mx-auto max-w-5xl">
@@ -113,7 +210,8 @@ export default function MessagesPage() {
     );
   }
 
-  const backHref = userRole === "seeker" ? "/" : "/employer/jobs";
+  const backHref =
+    user.role === "employer" || user.role === "admin" ? "/employer/jobs" : "/";
 
   return (
     <main className="min-h-screen bg-slate-900 p-6">
@@ -122,7 +220,9 @@ export default function MessagesPage() {
           <div>
             <h1 className="text-3xl font-bold text-slate-100">Messages</h1>
             <p className="mt-1 text-slate-300">
-              View and continue your conversations.
+              {unreadCount > 0
+                ? `You have ${unreadCount} unread conversation${unreadCount !== 1 ? "s" : ""}.`
+                : "Review your conversations with candidates and employers."}
             </p>
           </div>
 
@@ -137,73 +237,64 @@ export default function MessagesPage() {
         {loading ? (
           <StatusCard
             title="Loading Messages"
-            message="Please wait while your conversations are being loaded."
+            message="Please wait while your conversations are loading."
             variant="info"
           />
         ) : error ? (
-          <StatusCard
-            title="Error"
-            message={error}
-            variant="error"
-          />
-        ) : conversations.length === 0 ? (
+          <StatusCard title="Error" message={error} variant="error" />
+        ) : cards.length === 0 ? (
           <StatusCard
             title="No Conversations Yet"
-            message="You do not have any conversations yet."
+            message="Your messages will appear here once you start communicating."
             variant="neutral"
             actionHref={backHref}
             actionLabel="Go Back"
           />
         ) : (
           <div className="space-y-4">
-            {conversations.map((conversation) => {
-              const otherParty =
-                userRole === "employer"
-                  ? conversation.candidate_profile?.full_name || conversation.seeker_username
-                  : conversation.employer_username;
+            {cards.map((card) => (
+              <div
+                key={String(card.id)}
+                className={`rounded-xl border p-6 shadow-sm ${
+                  card.unread
+                    ? "border-blue-700 bg-slate-800"
+                    : "border-slate-700 bg-slate-800"
+                }`}
+              >
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="flex-1">
+                    <div className="mb-3 flex flex-wrap items-center gap-3">
+                      <h2 className="text-xl font-semibold text-slate-100">
+                        {card.title}
+                      </h2>
 
-              return (
-                <Link
-                  key={conversation.id}
-                  href={`/messages/${conversation.id}`}
-                  className="block rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-sm hover:bg-slate-750"
-                >
-                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <h2 className="text-xl font-semibold text-slate-100">
-                          {otherParty}
-                        </h2>
-
-                        {conversation.unread_count > 0 && (
-                          <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white">
-                            {conversation.unread_count} unread
-                          </span>
-                        )}
-                      </div>
-
-                      {conversation.candidate_profile?.headline && userRole === "employer" && (
-                        <p className="mt-1 text-slate-300">
-                          {conversation.candidate_profile.headline}
-                        </p>
+                      {card.unread && (
+                        <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white">
+                          Unread
+                        </span>
                       )}
-
-                      <p className="mt-3 text-sm text-slate-400">
-                        {conversation.last_message
-                          ? `${conversation.last_message.sender_username}: ${truncateText(
-                              conversation.last_message.body
-                            )}`
-                          : "No messages yet."}
-                      </p>
                     </div>
 
-                    <div className="text-sm text-slate-400">
-                      {new Date(conversation.updated_at).toLocaleString()}
-                    </div>
+                    <p className="text-sm text-slate-400">{card.subtitle}</p>
+
+                    <p className="mt-3 text-slate-300">{card.preview}</p>
+
+                    <p className="mt-3 text-sm text-slate-400">
+                      {formatDate(card.updatedAt)}
+                    </p>
                   </div>
-                </Link>
-              );
-            })}
+
+                  <div className="flex flex-wrap gap-3">
+                    <Link
+                      href={card.href}
+                      className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                    >
+                      Open Chat
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
