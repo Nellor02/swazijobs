@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import StatusCard from "../../components/StatusCard";
+import { useRouter } from "next/navigation";
 
 type AccountType = "seeker" | "employer";
 
@@ -10,12 +11,14 @@ type SeekerForm = {
   username: string;
   email: string;
   password: string;
+  confirm_password: string;
 };
 
 type EmployerForm = {
   username: string;
   email: string;
   password: string;
+  confirm_password: string;
   company_name: string;
   company_email: string;
   company_phone: string;
@@ -68,17 +71,20 @@ function extractErrorMessage(data: Record<string, unknown>) {
 
 export default function RegisterPage() {
   const [accountType, setAccountType] = useState<AccountType>("seeker");
+  const router = useRouter();
 
   const [seekerForm, setSeekerForm] = useState<SeekerForm>({
     username: "",
     email: "",
     password: "",
+    confirm_password: "",
   });
 
   const [employerForm, setEmployerForm] = useState<EmployerForm>({
     username: "",
     email: "",
     password: "",
+    confirm_password: "",
     company_name: "",
     company_email: "",
     company_phone: "",
@@ -95,9 +101,7 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  function handleSeekerChange(
-    e: React.ChangeEvent<HTMLInputElement>
-  ) {
+  function handleSeekerChange(e: React.ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target;
     setSeekerForm((prev) => ({
       ...prev,
@@ -121,6 +125,12 @@ export default function RegisterPage() {
     setError("");
     setSuccess("");
 
+    if (seekerForm.password !== seekerForm.confirm_password) {
+      setError("Passwords do not match.");
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch("http://127.0.0.1:8000/api/accounts/register/seeker/", {
         method: "POST",
@@ -136,17 +146,18 @@ export default function RegisterPage() {
         throw new Error(extractErrorMessage(data as Record<string, unknown>));
       }
 
-      setSuccess(
-        typeof data?.message === "string"
-          ? data.message
-          : "Seeker account created successfully. You can now log in."
-      );
+      setSuccess(data?.message || "Account created successfully.");
 
       setSeekerForm({
         username: "",
         email: "",
         password: "",
+        confirm_password: "",
       });
+
+      setTimeout(() => {
+        router.push(data?.redirect_to || "/login?registered=1");
+      }, 1200);
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Registration failed.");
@@ -160,6 +171,12 @@ export default function RegisterPage() {
     setLoading(true);
     setError("");
     setSuccess("");
+
+    if (employerForm.password !== employerForm.confirm_password) {
+      setError("Passwords do not match.");
+      setLoading(false);
+      return;
+    }
 
     try {
       const res = await fetch("http://127.0.0.1:8000/api/accounts/register/employer/", {
@@ -176,16 +193,13 @@ export default function RegisterPage() {
         throw new Error(extractErrorMessage(data as Record<string, unknown>));
       }
 
-      setSuccess(
-        typeof data?.message === "string"
-          ? data.message
-          : "Employer application submitted successfully."
-      );
+      setSuccess(data?.message || "Employer application submitted successfully.");
 
       setEmployerForm({
         username: "",
         email: "",
         password: "",
+        confirm_password: "",
         company_name: "",
         company_email: "",
         company_phone: "",
@@ -197,6 +211,10 @@ export default function RegisterPage() {
         contact_person_position: "",
         supporting_note: "",
       });
+
+      setTimeout(() => {
+        router.push(data?.redirect_to || "/login?employer_pending=1");
+      }, 1200);
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Employer application failed.");
@@ -211,22 +229,23 @@ export default function RegisterPage() {
         <div className="mb-8 text-center">
           <div className="mb-4 flex flex-col items-center">
             <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-2xl font-bold text-white">
-                SH
+              SH
             </div>
             <span className="mt-2 text-lg font-semibold text-slate-100">
-                SwiftHire
+              SwiftHire
             </span>
-            <p className="mt-3 text-sm text-slate-400 max-w-md mx-auto">
-                SwiftHire is a modern hiring platform built to connect job seekers with their next opportunity and employers with their next valuable employee: quickly, clearly, and with less friction.
+            <p className="mx-auto mt-3 max-w-md text-sm text-slate-400">
+              SwiftHire is a modern hiring platform built to connect job seekers
+              with their next opportunity and employers with their next valuable
+              employee: quickly, clearly, and with less friction.
             </p>
-        </div>
-        <h1 className="text-4xl font-bold text-slate-100">
-            Join SwiftHire
-        </h1>
+          </div>
 
-        <p className="mt-2 text-slate-300">
+          <h1 className="text-4xl font-bold text-slate-100">Join SwiftHire</h1>
+
+          <p className="mt-2 text-slate-300">
             Find your next job. Hire your next star. One click closer with SwiftHire.
-        </p>
+          </p>
         </div>
 
         <div className="mb-6 flex justify-center">
@@ -336,6 +355,21 @@ export default function RegisterPage() {
               />
             </div>
 
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-200">
+                Confirm Password
+              </label>
+              <input
+                type="password"
+                name="confirm_password"
+                value={seekerForm.confirm_password}
+                onChange={handleSeekerChange}
+                required
+                className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 outline-none focus:border-blue-500"
+                placeholder="Confirm your password"
+              />
+            </div>
+
             <button
               type="submit"
               disabled={loading}
@@ -390,19 +424,36 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-200">
-                Password
-              </label>
-              <input
-                type="password"
-                name="password"
-                value={employerForm.password}
-                onChange={handleEmployerChange}
-                required
-                className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 outline-none focus:border-blue-500"
-                placeholder="Create a password"
-              />
+            <div className="grid gap-6 md:grid-cols-2">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-200">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  name="password"
+                  value={employerForm.password}
+                  onChange={handleEmployerChange}
+                  required
+                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 outline-none focus:border-blue-500"
+                  placeholder="Create a password"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-200">
+                  Confirm Password
+                </label>
+                <input
+                  type="password"
+                  name="confirm_password"
+                  value={employerForm.confirm_password}
+                  onChange={handleEmployerChange}
+                  required
+                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 outline-none focus:border-blue-500"
+                  placeholder="Confirm your password"
+                />
+              </div>
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">

@@ -16,6 +16,11 @@ from .serializers import (
     EmployerApplicationRegisterSerializer,
     EmployerApplicationSerializer,
 )
+from .utils import (
+    notify_admins_new_employer_application,
+    notify_employer_application_review,
+    send_platform_email,
+)
 
 User = get_user_model()
 
@@ -40,7 +45,10 @@ class SeekerRegisterAPIView(APIView):
         if serializer.is_valid():
             serializer.save()
             return Response(
-                {"message": "Seeker account created successfully."},
+                {
+                    "message": "Seeker account created successfully.",
+                    "redirect_to": "/login?registered=1",
+                },
                 status=status.HTTP_201_CREATED,
             )
 
@@ -51,10 +59,26 @@ class EmployerApplyAPIView(APIView):
     def post(self, request):
         serializer = EmployerApplicationRegisterSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
+            application = serializer.save()
+
+            notify_admins_new_employer_application(application)
+
+            if application.user.email:
+                send_platform_email(
+                    subject="SwiftHire Employer Application Received",
+                    message=(
+                        f"Hello {application.user.username},\n\n"
+                        f"Your employer application for {application.company_name} "
+                        f"has been received and is currently pending review.\n\n"
+                        f"You can log in to SwiftHire to track your application status."
+                    ),
+                    recipient_list=[application.user.email],
+                )
+
             return Response(
                 {
-                    "message": "Employer application submitted successfully. Please wait for admin review."
+                    "message": "Employer application submitted successfully. Please wait for admin review.",
+                    "redirect_to": "/login?employer_pending=1",
                 },
                 status=status.HTTP_201_CREATED,
             )
@@ -99,6 +123,7 @@ class EmployerApplicationMeAPIView(APIView):
                     "admin_notes": "This is an existing employer account created before the employer application review workflow was introduced.",
                     "submitted_at": None,
                     "reviewed_at": None,
+                    "pending_reminder_sent_at": None,
                     "legacy_account": True,
                 },
                 status=status.HTTP_200_OK,
@@ -115,7 +140,7 @@ class AdminEmployerApplicationListAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        applications = EmployerApplication.objects.select_related("user").all()
+        applications = EmployerApplication.objects.select_related("user").all().order_by("-submitted_at")
         serializer = EmployerApplicationSerializer(applications, many=True)
         return Response(serializer.data)
 
@@ -176,10 +201,8 @@ class AdminEmployerApplicationReviewAPIView(APIView):
 
         if new_status == "approved":
             user = application.user
-
-            if getattr(user, "role", None) != "employer":
-                user.role = "employer"
-                user.save(update_fields=["role"])
+            user.role = "employer"
+            user.save(update_fields=["role"])
 
             from companies.models import Company
 
@@ -194,6 +217,32 @@ class AdminEmployerApplicationReviewAPIView(APIView):
                     website=application.company_website,
                     address=application.company_address,
                     description=application.business_description,
+                )
+
+        notify_employer_application_review(application)
+
+        if application.user.email:
+            if new_status == "approved":
+                send_platform_email(
+                    subject="SwiftHire Employer Application Approved",
+                    message=(
+                        f"Hello {application.user.username},\n\n"
+                        f"Your employer application for {application.company_name} "
+                        f"has been approved.\n\n"
+                        f"You can now log in and use your employer dashboard."
+                    ),
+                    recipient_list=[application.user.email],
+                )
+            else:
+                send_platform_email(
+                    subject="SwiftHire Employer Application Update",
+                    message=(
+                        f"Hello {application.user.username},\n\n"
+                        f"Your employer application for {application.company_name} "
+                        f"has been reviewed and was rejected.\n\n"
+                        f"Admin notes: {application.admin_notes or 'No additional notes provided.'}"
+                    ),
+                    recipient_list=[application.user.email],
                 )
 
         serializer = EmployerApplicationSerializer(application)

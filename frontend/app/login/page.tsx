@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import StatusCard from "../../components/StatusCard";
+import { useSearchParams } from "next/navigation";
 
 type LoginForm = {
   username: string;
@@ -51,6 +52,10 @@ function extractErrorMessage(data: Record<string, unknown>) {
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const registered = searchParams.get("registered");
+  const employerPending = searchParams.get("employer_pending");
 
   const [form, setForm] = useState<LoginForm>({
     username: "",
@@ -183,13 +188,33 @@ export default function LoginPage() {
           <p className="mx-auto mt-3 max-w-md text-sm text-slate-400">
             SwiftHire is a modern hiring platform built to connect job seekers
             with their next opportunity and employers with their next valuable
-            employee — quickly, clearly, and with less friction.
+            employee: quickly, clearly, and with less friction.
           </p>
         </div>
 
         {error && (
           <div className="mb-6">
             <StatusCard title="Login Error" message={error} variant="error" />
+          </div>
+        )}
+
+        {registered === "1" && (
+          <div className="mb-6">
+            <StatusCard
+              title="Account Created"
+              message="Your account was created successfully. Please log in."
+              variant="success"
+            />
+          </div>
+        )}
+
+        {employerPending === "1" && (
+          <div className="mb-6">
+            <StatusCard
+              title="Employer Application Submitted"
+              message="Your employer application was submitted successfully. You can log in to track its status while it is under review."
+              variant="success"
+            />
           </div>
         )}
 
