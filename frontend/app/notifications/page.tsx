@@ -37,16 +37,32 @@ function getNotificationHref(notification: NotificationItem, userRole: string) {
   switch (notification.type) {
     case "message":
       return notification.target_id ? `/messages/${notification.target_id}` : "/messages";
+
     case "application":
+      if (userRole === "admin") {
+        return notification.target_id
+          ? `/admin/employer-applications/${notification.target_id}`
+          : "/admin/employer-applications";
+      }
+
       return notification.target_id
         ? `/employer/jobs/${notification.target_id}/applicants`
         : "/employer/jobs";
+
     case "status_update":
+      if (userRole === "employer") {
+        return "/employer/application-status";
+      }
       return "/my-applications";
+
     case "shortlist":
       return "/profile/preview";
+
     default:
-      return userRole === "employer" || userRole === "admin" ? "/employer/jobs" : "/";
+      if (userRole === "admin") {
+        return "/admin/employer-applications";
+      }
+      return userRole === "employer" ? "/employer/jobs" : "/";
   }
 }
 
@@ -90,7 +106,7 @@ export default function NotificationsPage() {
     setIsLoggedIn(true);
     setUserRole(user.role);
 
-    authFetch("http://127.0.0.1:8000/api/profiles/notifications/")
+    authFetch("/api/profiles/notifications/")
       .then(async (res) => {
         const data = await parseResponseSafely(res);
 
@@ -119,7 +135,7 @@ export default function NotificationsPage() {
 
     try {
       const res = await authFetch(
-        `http://127.0.0.1:8000/api/profiles/notifications/${notificationId}/read/`,
+        `/api/profiles/notifications/${notificationId}/read/`,
         {
           method: "PATCH",
         }
@@ -152,7 +168,7 @@ export default function NotificationsPage() {
 
     try {
       const res = await authFetch(
-        "http://127.0.0.1:8000/api/profiles/notifications/read-all/",
+        "/api/profiles/notifications/read-all/",
         {
           method: "POST",
         }
@@ -196,7 +212,11 @@ export default function NotificationsPage() {
   }
 
   const backHref =
-    userRole === "employer" || userRole === "admin" ? "/employer/jobs" : "/";
+    userRole === "admin"
+      ? "/admin/employer-applications"
+      : userRole === "employer"
+        ? "/employer/jobs"
+        : "/";
 
   return (
     <main className="min-h-screen bg-slate-900 p-6">
@@ -240,11 +260,7 @@ export default function NotificationsPage() {
             variant="info"
           />
         ) : error ? (
-          <StatusCard
-            title="Error"
-            message={error}
-            variant="error"
-          />
+          <StatusCard title="Error" message={error} variant="error" />
         ) : notifications.length === 0 ? (
           <StatusCard
             title="No Notifications Yet"

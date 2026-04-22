@@ -51,6 +51,11 @@ type Company = {
   jobs_count: number;
 };
 
+type StoredUser = {
+  username: string;
+  role: string;
+};
+
 function getJobTypeClasses(jobType: string) {
   switch (jobType?.toLowerCase()) {
     case "full_time":
@@ -115,16 +120,18 @@ const PAGE_SIZE = 5;
 
 export default function EmployerJobsPage() {
   const [userChecked, setUserChecked] = useState(false);
+  const [userRole, setUserRole] = useState<StoredUser["role"] | "">("");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isEmployer, setIsEmployer] = useState(false);
+  const [isEmployerOrAdmin, setIsEmployerOrAdmin] = useState(false);
   const [isApprovedEmployer, setIsApprovedEmployer] = useState(true);
   const [approvalLoading, setApprovalLoading] = useState(true);
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
-  const [companyLoading, setCompanyLoading] = useState(true);
+  const [companyLoading, setCompanyLoading] = useState(false);
   const [error, setError] = useState("");
+  const [companyError, setCompanyError] = useState("");
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -141,8 +148,9 @@ export default function EmployerJobsPage() {
 
     if (!user) {
       setUserChecked(true);
+      setUserRole("");
       setIsLoggedIn(false);
-      setIsEmployer(false);
+      setIsEmployerOrAdmin(false);
       setLoading(false);
       setApprovalLoading(false);
       setCompanyLoading(false);
@@ -150,17 +158,18 @@ export default function EmployerJobsPage() {
     }
 
     setUserChecked(true);
+    setUserRole(user.role);
     setIsLoggedIn(true);
 
     if (!["employer", "admin"].includes(user.role)) {
-      setIsEmployer(false);
+      setIsEmployerOrAdmin(false);
       setLoading(false);
       setApprovalLoading(false);
       setCompanyLoading(false);
       return;
     }
 
-    setIsEmployer(true);
+    setIsEmployerOrAdmin(true);
 
     if (user.role === "admin") {
       setIsApprovedEmployer(true);
@@ -168,7 +177,7 @@ export default function EmployerJobsPage() {
       return;
     }
 
-    authFetch("http://127.0.0.1:8000/api/accounts/employer-application/me/")
+    authFetch("/api/accounts/employer-application/me/")
       .then(async (res) => {
         const data = await parseResponseSafely(res);
 
@@ -199,13 +208,12 @@ export default function EmployerJobsPage() {
     if (
       !userChecked ||
       !isLoggedIn ||
-      !isEmployer ||
+      !isEmployerOrAdmin ||
       approvalLoading ||
       !isApprovedEmployer
     ) {
       if (!approvalLoading && !isApprovedEmployer) {
         setLoading(false);
-        setCompanyLoading(false);
       }
       return;
     }
@@ -214,7 +222,7 @@ export default function EmployerJobsPage() {
     setError("");
 
     authFetch(
-      `http://127.0.0.1:8000/api/jobs/employer/?page=${currentPage}&page_size=${PAGE_SIZE}`
+      `/api/jobs/employer/?page=${currentPage}&page_size=${PAGE_SIZE}`
     )
       .then(async (res) => {
         const data = await parseResponseSafely(res);
@@ -236,20 +244,20 @@ export default function EmployerJobsPage() {
         setError(err instanceof Error ? err.message : "Could not load jobs.");
         setLoading(false);
       });
-  }, [userChecked, isLoggedIn, isEmployer, approvalLoading, isApprovedEmployer, currentPage]);
+  }, [userChecked, isLoggedIn, isEmployerOrAdmin, approvalLoading, isApprovedEmployer, currentPage]);
 
   useEffect(() => {
     if (
       !userChecked ||
       !isLoggedIn ||
-      !isEmployer ||
+      !isEmployerOrAdmin ||
       approvalLoading ||
       !isApprovedEmployer
     ) {
       return;
     }
 
-    authFetch("http://127.0.0.1:8000/api/jobs/dashboard/stats/")
+    authFetch("/api/jobs/dashboard/stats/")
       .then(async (res) => {
         const data = await parseResponseSafely(res);
         if (!res.ok) {
@@ -260,22 +268,30 @@ export default function EmployerJobsPage() {
       .catch((err) => {
         console.error(err);
       });
-  }, [userChecked, isLoggedIn, isEmployer, approvalLoading, isApprovedEmployer]);
+  }, [userChecked, isLoggedIn, isEmployerOrAdmin, approvalLoading, isApprovedEmployer]);
 
   useEffect(() => {
     if (
       !userChecked ||
       !isLoggedIn ||
-      !isEmployer ||
+      !isEmployerOrAdmin ||
       approvalLoading ||
       !isApprovedEmployer
     ) {
       return;
     }
 
-    setCompanyLoading(true);
+    if (userRole !== "employer") {
+      setCompany(null);
+      setCompanyLoading(false);
+      setCompanyError("");
+      return;
+    }
 
-    authFetch("http://127.0.0.1:8000/api/companies/me/")
+    setCompanyLoading(true);
+    setCompanyError("");
+
+    authFetch("/api/companies/me/")
       .then(async (res) => {
         const data = await parseResponseSafely(res);
         if (!res.ok) {
@@ -290,9 +306,12 @@ export default function EmployerJobsPage() {
       .catch((err) => {
         console.error(err);
         setCompany(null);
+        setCompanyError(
+          err instanceof Error ? err.message : "Could not load company profile."
+        );
         setCompanyLoading(false);
       });
-  }, [userChecked, isLoggedIn, isEmployer, approvalLoading, isApprovedEmployer]);
+  }, [userChecked, isLoggedIn, isEmployerOrAdmin, approvalLoading, isApprovedEmployer, userRole]);
 
   async function handleDelete(jobId: number) {
     const confirmDelete = confirm("Are you sure you want to delete this job?");
@@ -300,7 +319,7 @@ export default function EmployerJobsPage() {
 
     try {
       const res = await authFetch(
-        `http://127.0.0.1:8000/api/jobs/${jobId}/delete/`,
+        `/api/jobs/${jobId}/delete/`,
         {
           method: "DELETE",
         }
@@ -370,7 +389,7 @@ export default function EmployerJobsPage() {
     );
   }
 
-  if (!isEmployer) {
+  if (!isEmployerOrAdmin) {
     return (
       <main className="min-h-screen bg-slate-900 p-6">
         <div className="mx-auto max-w-6xl">
@@ -400,7 +419,7 @@ export default function EmployerJobsPage() {
     );
   }
 
-  if (!isApprovedEmployer) {
+  if (userRole === "employer" && !isApprovedEmployer) {
     return (
       <main className="min-h-screen bg-slate-900 p-6">
         <div className="mx-auto max-w-6xl">
@@ -416,16 +435,20 @@ export default function EmployerJobsPage() {
     );
   }
 
+  const isAdmin = userRole === "admin";
+
   return (
     <main className="min-h-screen bg-slate-900 p-6">
       <div className="mx-auto max-w-6xl">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-slate-100">
-              Employer Dashboard
+              {isAdmin ? "Platform Jobs Dashboard" : "Employer Dashboard"}
             </h1>
             <p className="mt-1 text-slate-300">
-              Manage your job postings and track performance.
+              {isAdmin
+                ? "Monitor all platform jobs and platform-level hiring activity."
+                : "Manage your job postings and track performance."}
             </p>
           </div>
 
@@ -437,26 +460,39 @@ export default function EmployerJobsPage() {
               Back to Home
             </Link>
 
-            <Link
-              href="/talent"
-              className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700"
-            >
-              Talent Search
-            </Link>
+            {!isAdmin && (
+              <>
+                <Link
+                  href="/talent"
+                  className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700"
+                >
+                  Talent Search
+                </Link>
 
-            <Link
-              href="/employer/accepted"
-              className="rounded-lg bg-yellow-600 px-4 py-2 text-sm font-medium text-white hover:bg-yellow-700"
-            >
-              Accepted Candidates
-            </Link>
+                <Link
+                  href="/employer/accepted"
+                  className="rounded-lg bg-yellow-600 px-4 py-2 text-sm font-medium text-white hover:bg-yellow-700"
+                >
+                  Accepted Candidates
+                </Link>
 
-            <Link
-              href="/employer/jobs/new"
-              className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-            >
-              + Create Job
-            </Link>
+                <Link
+                  href="/employer/jobs/new"
+                  className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                >
+                  + Create Job
+                </Link>
+              </>
+            )}
+
+            {isAdmin && (
+              <Link
+                href="/admin/analytics"
+                className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700"
+              >
+                Analytics
+              </Link>
+            )}
           </div>
         </div>
 
@@ -476,90 +512,124 @@ export default function EmployerJobsPage() {
           </div>
 
           <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
-            <p className="text-sm text-slate-400">Accepted Candidates</p>
+            <p className="text-sm text-slate-400">
+              {isAdmin ? "Accepted Applications" : "Accepted Candidates"}
+            </p>
             <h2 className="text-2xl font-bold text-white">
               {stats.total_shortlisted}
             </h2>
           </div>
         </div>
 
-        <div className="mb-6 rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-semibold text-slate-100">
-                Company Profile
-              </h2>
-              <p className="mt-1 text-slate-300">
-                Manage how your company appears to candidates on SwiftHire.
-              </p>
+        {!isAdmin && (
+          <div className="mb-6 rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-100">
+                  Company Profile
+                </h2>
+                <p className="mt-1 text-slate-300">
+                  Manage how your company appears to candidates on SwiftHire.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <Link
+                  href="/employer/company"
+                  className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700"
+                >
+                  Edit Company
+                </Link>
+
+                {company && (
+                  <Link
+                    href={`/companies/${company.id}`}
+                    className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"
+                  >
+                    View Public Profile
+                  </Link>
+                )}
+              </div>
             </div>
 
-            <div className="flex flex-wrap gap-3">
+            {companyLoading ? (
+              <p className="mt-4 text-slate-300">Loading company profile...</p>
+            ) : company ? (
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="space-y-3 text-slate-300">
+                  <p>
+                    <span className="font-semibold text-slate-100">Name:</span>{" "}
+                    {company.name || "Not provided"}
+                  </p>
+                  <p>
+                    <span className="font-semibold text-slate-100">Email:</span>{" "}
+                    {company.email || "Not provided"}
+                  </p>
+                  <p>
+                    <span className="font-semibold text-slate-100">Phone:</span>{" "}
+                    {company.phone || "Not provided"}
+                  </p>
+                </div>
+
+                <div className="space-y-3 text-slate-300">
+                  <p>
+                    <span className="font-semibold text-slate-100">Website:</span>{" "}
+                    {company.website || "Not provided"}
+                  </p>
+                  <p>
+                    <span className="font-semibold text-slate-100">Jobs Live:</span>{" "}
+                    {company.jobs_count}
+                  </p>
+                  <p>
+                    <span className="font-semibold text-slate-100">Address:</span>{" "}
+                    {company.address || "Not provided"}
+                  </p>
+                </div>
+
+                <div className="md:col-span-2">
+                  <p className="font-semibold text-slate-100">Description:</p>
+                  <p className="mt-2 whitespace-pre-line text-slate-300">
+                    {company.description || "No description provided yet."}
+                  </p>
+                </div>
+              </div>
+            ) : companyError ? (
+              <p className="mt-4 text-slate-400">{companyError}</p>
+            ) : (
+              <p className="mt-4 text-slate-400">
+                Company profile could not be loaded.
+              </p>
+            )}
+          </div>
+        )}
+
+        {isAdmin && (
+          <div className="mb-6 rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-slate-100">
+              Admin Platform View
+            </h2>
+            <p className="mt-2 text-slate-300">
+              You are viewing the platform-wide jobs dashboard as an administrator.
+              Company profile controls are employer-only and are intentionally hidden here.
+            </p>
+
+            <div className="mt-4 flex flex-wrap gap-3">
               <Link
-                href="/employer/company"
-                className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700"
+                href="/admin/employer-applications"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
               >
-                Edit Company
+                Review Employer Applications
               </Link>
 
-              {company && (
-                <Link
-                  href={`/companies/${company.id}`}
-                  className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"
-                >
-                  View Public Profile
-                </Link>
-              )}
+              <Link
+                href="/admin/analytics"
+                className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"
+              >
+                View Analytics
+              </Link>
             </div>
           </div>
-
-          {companyLoading ? (
-            <p className="mt-4 text-slate-300">Loading company profile...</p>
-          ) : company ? (
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <div className="space-y-3 text-slate-300">
-                <p>
-                  <span className="font-semibold text-slate-100">Name:</span>{" "}
-                  {company.name || "Not provided"}
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-100">Email:</span>{" "}
-                  {company.email || "Not provided"}
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-100">Phone:</span>{" "}
-                  {company.phone || "Not provided"}
-                </p>
-              </div>
-
-              <div className="space-y-3 text-slate-300">
-                <p>
-                  <span className="font-semibold text-slate-100">Website:</span>{" "}
-                  {company.website || "Not provided"}
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-100">Jobs Live:</span>{" "}
-                  {company.jobs_count}
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-100">Address:</span>{" "}
-                  {company.address || "Not provided"}
-                </p>
-              </div>
-
-              <div className="md:col-span-2">
-                <p className="font-semibold text-slate-100">Description:</p>
-                <p className="mt-2 whitespace-pre-line text-slate-300">
-                  {company.description || "No description provided yet."}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <p className="mt-4 text-slate-400">
-              Company profile could not be loaded.
-            </p>
-          )}
-        </div>
+        )}
 
         <div className="mb-6 flex items-center justify-between">
           <p className="text-sm text-slate-300">
@@ -575,7 +645,7 @@ export default function EmployerJobsPage() {
         {loading ? (
           <StatusCard
             title="Loading Jobs"
-            message="Please wait while your jobs are loading."
+            message="Please wait while jobs are loading."
             variant="info"
           />
         ) : error ? (
@@ -583,10 +653,10 @@ export default function EmployerJobsPage() {
         ) : jobs.length === 0 ? (
           <StatusCard
             title="No Jobs Found"
-            message="You haven't posted any jobs yet."
+            message={isAdmin ? "No platform jobs found." : "You haven't posted any jobs yet."}
             variant="neutral"
-            actionHref="/employer/jobs/new"
-            actionLabel="Create Your First Job"
+            actionHref={isAdmin ? "/admin/analytics" : "/employer/jobs/new"}
+            actionLabel={isAdmin ? "View Analytics" : "Create Your First Job"}
           />
         ) : (
           <>
@@ -642,26 +712,30 @@ export default function EmployerJobsPage() {
                         View Details
                       </Link>
 
-                      <Link
-                        href={`/employer/jobs/${job.id}/applicants`}
-                        className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700"
-                      >
-                        View Applicants
-                      </Link>
+                      {!isAdmin && (
+                        <>
+                          <Link
+                            href={`/employer/jobs/${job.id}/applicants`}
+                            className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700"
+                          >
+                            View Applicants
+                          </Link>
 
-                      <Link
-                        href={`/employer/jobs/${job.id}/edit`}
-                        className="rounded-lg bg-yellow-600 px-4 py-2 text-sm font-medium text-white hover:bg-yellow-700"
-                      >
-                        Edit Job
-                      </Link>
+                          <Link
+                            href={`/employer/jobs/${job.id}/edit`}
+                            className="rounded-lg bg-yellow-600 px-4 py-2 text-sm font-medium text-white hover:bg-yellow-700"
+                          >
+                            Edit Job
+                          </Link>
 
-                      <button
-                        onClick={() => handleDelete(job.id)}
-                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
-                      >
-                        Delete
-                      </button>
+                          <button
+                            onClick={() => handleDelete(job.id)}
+                            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
